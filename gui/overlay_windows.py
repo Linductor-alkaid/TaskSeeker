@@ -111,6 +111,10 @@ class FloatingWindow(QWidget):
             else:
                 bg_color = QColor(245, 245, 245, 230)
         
+        # 加载窗口透明度
+        opacity = global_config.get("appearance.window_opacity", 0.95)
+        self.setWindowOpacity(opacity)  # 设置窗口不透明度
+        
         self.text_color = QColor(global_config.get("appearance.text_color", "#333333"))
         if not self.text_color.isValid():
             self.text_color = QColor("#333333")

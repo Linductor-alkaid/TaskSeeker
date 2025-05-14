@@ -1,19 +1,21 @@
 # requirements.txt
-# 核心依赖
-# deepseekapi==0.1.0      # 您已实现的API客户端
-openai>=1.3.0
-requests>=2.26.0
-pydantic>=1.9.0
-python-dotenv>=0.19.0
-PyQt5>=5.15             # 跨平台GUI框架
-pynput>=1.7             # 全局热键监听
-mss>=9.0                # 高性能截屏
-pytesseract>=0.3.10     # OCR文字识别
-pyclip>=0.7.0           # 剪贴板操作
-numpy>=1.24             # 图像处理
+# 核心依赖（所有平台）
+PyQt5>=5.15.4
+pynput>=1.7.6
+mss>=9.0.1
+pytesseract>=0.3.10
+pyclip>=0.7.0
+numpy>=1.24.2
+requests>=2.31.0
+Pillow>=10.0.0  # 替代PIL模块
+opencv-python-headless>=4.6.0  # OCR预处理
+python-dotenv>=1.0.0
 
-# Windows专用
+# Windows专用依赖
 pywin32>=306; sys_platform == 'win32'
 
-# Linux专用
+# Linux专用依赖
 python-xlib>=0.33; sys_platform == 'linux'
+
+# 可选依赖（Mathpix支持）
+# mathpix-official>=0.0.9; extra == 'mathpix'
