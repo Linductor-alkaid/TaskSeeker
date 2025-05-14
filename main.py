@@ -28,6 +28,7 @@ logging.basicConfig(
 class Worker(QObject):
     finished = pyqtSignal(object)
     error = pyqtSignal(Exception)
+    chunk_received = pyqtSignal(str)
     
     def __init__(self, task, *args, **kwargs):
         super().__init__()
@@ -45,8 +46,14 @@ class Worker(QObject):
             if not self._active:
                 return
             
-            result = self.task(*self.args, **self.kwargs)
-            self.finished.emit(result)
+            # 处理生成器类型的任务
+            result_generator = self.task(*self.args, **self.kwargs)
+            for chunk in result_generator:
+                if not self._active:
+                    break
+                self.chunk_received.emit(chunk)
+                
+            self.finished.emit()
         except Exception as e:
             self.error.emit(e)
         finally:
@@ -214,36 +221,40 @@ class TaskSeekerApp(QObject):
             logging.error(f"文本选择失败: {str(e)}")
 
     def handle_query_text(self, text: str):
-        """处理查询文本"""
+        """处理文本，增强流式请求控制"""
         if not text.strip():
             return
 
         with QMutexLocker(self.thread_lock):
-            # 停止现有API线程
+            # 停止现有API请求
             self._safe_stop_thread(self._api_worker, self.api_thread)
             
+            # 初始化新线程
             self.api_thread = QThread()
             self._api_worker = Worker(self.api.generate_response, text)
             self._api_worker.moveToThread(self.api_thread)
             
-            # 使用正确的弱引用对象
+            # 弱引用防止循环引用
             weak_self = weakref.proxy(self)
             weak_window = weakref.proxy(self.floating_window)
             
-            self.api_thread.started.connect(self._api_worker.run)
+            # 连接流式信号
+            self._api_worker.chunk_received.connect(
+                lambda chunk: weak_window.stream_chunk_received.emit(chunk))
             self._api_worker.finished.connect(
-                lambda result: weak_window.show_content(result))
+                lambda: weak_window.stream_finished.emit())
             self._api_worker.error.connect(
-                lambda e: weak_window.show_error(str(e)))
+                lambda e: weak_window.stream_finished.emit())
             
-            # 修正信号连接：使用TaskSeekerApp的弱引用
-            self._api_worker.finished.connect(self.api_thread.quit)
-            self.api_thread.finished.connect(
-                lambda: weak_self._safe_stop_thread(weak_self._api_worker, weak_self.api_thread))  # 修正此处
+            # 连接线程信号
+            self.api_thread.started.connect(self._api_worker.run)
+            self.floating_window.stream_finished.connect(
+                lambda: weak_self._safe_stop_thread(weak_self._api_worker, weak_self.api_thread))
             
-            self.floating_window.show_loading()
+            # 启动流程
+            self.floating_window.start_streaming(text)
             self.api_thread.start()
-
+            
     def store_window_position(self, pos: QPoint):
         """记录窗口最后位置"""
         self.last_query_position = pos

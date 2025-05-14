@@ -42,7 +42,7 @@ class DeepSeekAPI:
     def generate_response(
         self,
         prompt: str,
-        stream: bool = False
+        stream: bool = True
     ) -> Union[str, Generator[str, None, None]]:
         """
         生成模型响应（自动集成系统提示）
@@ -81,16 +81,33 @@ class DeepSeekAPI:
         return response["content"]
 
     def _handle_stream_response(self, response: Generator) -> Generator[str, None, None]:
-        """处理流式响应"""
+        """增强流式响应处理"""
         try:
+            first_chunk = True
             for chunk in response:
-                if "content" in chunk:
-                    yield chunk["content"]
-                elif "error" in chunk:
+                # 处理正常内容
+                if 'content' in chunk:
+                    content = chunk['content']
+                    # 首块处理逻辑优化
+                    if first_chunk:
+                        yield content.lstrip()
+                        first_chunk = False
+                    else:
+                        yield content
+                # 处理服务端返回的错误
+                elif 'error' in chunk:
                     logger.error(f"流式响应错误: {chunk['error']}")
+                    yield f"\n[API错误: {chunk['error']}]"
                     break
+                # 处理空响应（心跳保持）
+                elif 'delta' in chunk and not chunk['delta']:
+                    continue
         except APIError as e:
             logger.error(f"流式请求中断: {str(e)}")
+            yield f"\n[请求中断: {str(e)}]"
+        except Exception as e:
+            logger.critical(f"未处理的流式错误: {str(e)}")
+            yield f"\n[系统错误: {str(e)}]"
 
     def code_completion(self, prefix: str, suffix: str = "") -> str:
         """

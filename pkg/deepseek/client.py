@@ -55,8 +55,8 @@ class DeepSeekClient:
             if self.system_prompt:
                 messages.append({"role": "system", "content": self.system_prompt})
             messages.append({"role": "user", "content": usermessages})
-            
             self.messages.extend(messages)  # 保留历史记录
+
             response = self.client.chat.completions.create(
                 model=self.model,
                 messages=self.messages,
@@ -64,12 +64,33 @@ class DeepSeekClient:
                 temperature=temperature,
                 stream=stream
             )
-            assistant_message = {
-                "role": response.choices[0].message.role,
-                "content": response.choices[0].message.content
-            }
-            self.messages.append(assistant_message)
-            return assistant_message
+
+            if stream:
+                content = ""
+                reasoning_content = ""
+                for chunk in response:
+                    delta = chunk.choices[0].delta
+                    # 获取每个块的增量内容
+                    rc = getattr(delta, 'reasoning_content', '')
+                    c = getattr(delta, 'content', '')
+                    reasoning_content += rc
+                    content += c
+                    # 返回当前块的增量内容
+                    yield {"reasoning_content": rc, "content": c}
+                # 流式处理完成后，添加完整消息到历史记录
+                assistant_message = {
+                    "role": "assistant",
+                    "content": content.strip()
+                }
+                self.messages.append(assistant_message)
+            else:
+                # 非流式处理逻辑保持不变
+                assistant_message = {
+                    "role": response.choices[0].message.role,
+                    "content": response.choices[0].message.content
+                }
+                self.messages.append(assistant_message)
+                return assistant_message
         except Exception as e:
             self._handle_openai_error(e)
 

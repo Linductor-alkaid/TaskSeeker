@@ -1,5 +1,5 @@
 # gui/overlay_windows.py
-from PyQt5.QtCore import Qt, QPoint, QTimer, pyqtSignal, QSize, QEvent, QRectF
+from PyQt5.QtCore import Qt, QPoint, QTimer, pyqtSignal, QSize, QEvent, QRectF, QRect
 from PyQt5.QtWidgets import (QWidget, QTextEdit, QApplication, QPushButton, 
                              QScrollArea, QVBoxLayout, QSizeGrip, QMenu)
 from PyQt5.QtGui import (QPainter, QColor, QPen, QCursor, QFont, QLinearGradient,
@@ -7,6 +7,7 @@ from PyQt5.QtGui import (QPainter, QColor, QPen, QCursor, QFont, QLinearGradient
 from PyQt5.QtWidgets import QGraphicsOpacityEffect  # 用于复制反馈动画
 from PyQt5.QtCore import QPropertyAnimation, QAbstractAnimation  # 用于动画系统
 from config import global_config
+import time
 
 class FloatingWindow(QWidget):
     closed = pyqtSignal()
@@ -14,6 +15,8 @@ class FloatingWindow(QWidget):
     shown = pyqtSignal()
     copy_requested = pyqtSignal(str)
     error_occurred = pyqtSignal(str)
+    stream_chunk_received = pyqtSignal(str)
+    stream_finished = pyqtSignal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -21,6 +24,16 @@ class FloatingWindow(QWidget):
         self._init_state()
         self._load_config()
         self._init_shortcuts()
+        self.streaming = False
+        self.stream_buffer = []
+        self.stream_start_time = None
+        # 连接信号
+        self.stream_chunk_received.connect(self._append_stream_chunk)
+        self.stream_finished.connect(self._finalize_stream)
+
+        self.stream_update_timer = QTimer()
+        self.stream_update_timer.timeout.connect(self._flush_stream_buffer)
+        self.stream_update_timer.setInterval(150)  # 150毫秒更新一次
         
         # 配置更新监听
         global_config.config_updated.connect(self._on_config_changed)
@@ -98,6 +111,84 @@ class FloatingWindow(QWidget):
         # 边缘检测阈值
         self.edge_margin = 8
 
+    def start_streaming(self, prompt: str):
+        """流式启动逻辑"""
+        self.streaming = True
+        self.is_first_chunk = True
+        self.stream_buffer = []
+        self.stream_start_time = time.time()
+        self.error_occurred = False  # 新增错误状态标志
+        self.show_loading()
+        self.stream_update_timer.start()
+        
+    def _append_stream_chunk(self, chunk: str):
+        """追加流式内容"""
+        if not self.isVisible():
+            self.show()
+        if self.error_occurred:
+            return
+            
+        # 如果是第一个块，替换"加载中..."
+        if "加载中..." in self.text_edit.toPlainText():
+            self.text_edit.setPlainText(chunk)
+        else:
+            self.text_edit.moveCursor(QTextCursor.End)
+            self.text_edit.insertPlainText(chunk)
+        
+        if "[API错误" in chunk or "[请求中断" in chunk:
+            self.error_occurred = True
+            self.stream_buffer.append(chunk)
+            self._flush_stream_buffer()
+            self.stream_finished.emit()
+            return
+        
+        self.stream_buffer.append(chunk)
+            
+        self.adjust_size()
+        
+    def _finalize_stream(self):
+        """最终状态处理"""
+        self.stream_update_timer.stop()
+        self._flush_stream_buffer()
+        
+        if self.error_occurred:
+            duration = time.time() - self.stream_start_time
+            self.text_edit.append(f"\n[请求异常终止 耗时: {duration:.2f}s]")
+            self.container.setStyleSheet("background: rgba(255, 245, 245, 0.95);")
+        else:
+            duration = time.time() - self.stream_start_time
+            self.text_edit.append(f"\n\n[耗时 {duration:.2f}秒]")
+        
+        # 自动调整窗口尺寸优化
+        doc_height = self.text_edit.document().size().height()
+        screen_height = QApplication.desktop().availableGeometry().height()
+        self.resize(self.width(), min(int(doc_height + 40), int(screen_height * 0.6)))
+        
+        self.streaming = False
+        
+    def _flush_stream_buffer(self):
+        """批量处理缓冲内容"""
+        if not self.stream_buffer or self.error_occurred:
+            return
+        
+        combined = "".join(self.stream_buffer)
+        self.stream_buffer.clear()
+        
+        # 处理首块替换逻辑
+        if self.is_first_chunk:
+            self.text_edit.setPlainText(combined)
+            self.is_first_chunk = False
+        else:
+            self.text_edit.moveCursor(QTextCursor.End)
+            self.text_edit.insertPlainText(combined)
+        
+        # 智能滚动控制
+        scrollbar = self.text_edit.verticalScrollBar()
+        if scrollbar.value() >= scrollbar.maximum() - 50:  # 在接近底部时自动滚动
+            self.text_edit.ensureCursorVisible()
+        
+        self.adjust_size()
+
     def _load_config(self):
         """加载外观配置"""
         # 确保正确解析颜色值
@@ -137,9 +228,25 @@ class FloatingWindow(QWidget):
         self.adjust_size()
         self.show()
         self.activateWindow()
+
+    def _on_key_press(self, event: QKeyEvent):
+        """中断处理"""
+        if event.key() == Qt.Key_Escape and self.streaming:
+            self.streaming = False
+            self.stream_update_timer.stop()
+            self.text_edit.append("\n[用户主动中断]")
+            self._finalize_stream()
+            # 发射中断信号给后台
+            self.stream_finished.emit()  
+            return
+        super().keyPressEvent(event)
     
     def show_error(self, message: str):
         """显示错误信息"""
+        self.streaming = False
+        self.stream_update_timer.stop()
+        self._flush_stream_buffer()
+
         error_style = """
             #container {
                 background: rgba(255, 220, 220, 0.95);
@@ -217,13 +324,22 @@ class FloatingWindow(QWidget):
         self.activateWindow()
 
     def adjust_size(self):
-        """根据内容自动调整窗口大小"""
+        """带节流机制的尺寸调整"""
+        if not hasattr(self, "_last_adjust"):
+            self._last_adjust = 0
+        
+        # 限制调整频率(至少间隔200ms)
+        now = time.time()
+        if now - self._last_adjust < 0.2:
+            return
+        
         doc = self.text_edit.document()
         doc.setTextWidth(self.text_edit.viewport().width())
         height = int(doc.size().height() + 25)
         
         max_height = int(QApplication.desktop().availableGeometry().height() * 0.7)
         self.resize(self.width(), min(height, max_height))
+        self._last_adjust = now
 
     def mousePressEvent(self, event):
         """处理鼠标按下事件"""
