@@ -32,7 +32,7 @@ class SettingsDialog(QDialog):
         self.api_token_edit.setEchoMode(QLineEdit.Password)
         self.api_endpoint_edit = QLineEdit()
         self.api_model_combo = QComboBox()
-        self.api_model_combo.addItems(["deepseek-chat", "deepseek-coder"])
+        self.api_model_combo.addItems(["deepseek-chat", "deepseek-R1"])
         self.max_tokens_spin = QSpinBox()
         self.max_tokens_spin.setRange(1, 4096)
         self.temperature_spin = QDoubleSpinBox()

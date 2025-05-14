@@ -79,9 +79,8 @@ DEEPSEEK_TIMEOUT=30
 ### 系统托盘控制
 
 右键点击任务栏图标开启功能矩阵：
-- 🖱️ **即时翻译模式**：划选文本 → Ctrl+Shift+T
-- 📷 **智能截图模式**：Win+Shift+S / Ctrl+Alt+S
-
+- 🖱️ **即时翻译模式**：划选文本 → Ctrl+ALT+O
+- 📷 **智能截图模式**：Win+Shift+S / Ctrl+ALT+P
 ### 核心工作流示例
 **学术文献解析**：
 1. 使用截图工具捕获PDF段落

@@ -1,7 +1,7 @@
 {
     "hotkeys": {
-      "screenshot": "ctrl+shift+s",
-      "text_select": "ctrl+shift+t"
+      "screenshot": "ctrl+alt+o",
+      "text_select": "ctrl+alt+p"
     },
     "appearance": {
       "font_size": 14,
