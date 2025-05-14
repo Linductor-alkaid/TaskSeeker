@@ -76,6 +76,11 @@ DEEPSEEK_TIMEOUT=30
 
 ## 🎮 使用方法
 
+```bash
+# 启动主程序
+python main.py
+```
+
 ### 系统托盘控制
 
 右键点击任务栏图标开启功能矩阵：
