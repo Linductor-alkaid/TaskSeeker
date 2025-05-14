@@ -3,6 +3,7 @@ import weakref
 import numpy as np
 import sys
 import logging
+import types
 from PyQt5.QtWidgets import QApplication, QMessageBox
 from PyQt5.QtCore import QObject, pyqtSignal, QTimer, Qt, QPoint, QThread, QMutex, QMutexLocker
 from config import global_config
@@ -48,12 +49,14 @@ class Worker(QObject):
             
             # 处理生成器类型的任务
             result_generator = self.task(*self.args, **self.kwargs)
-            for chunk in result_generator:
-                if not self._active:
-                    break
-                self.chunk_received.emit(chunk)
-                
-            self.finished.emit()
+            if isinstance(result_generator, types.GeneratorType):
+                for chunk in result_generator:
+                    if not self._active:
+                        break
+                    self.chunk_received.emit(chunk)
+                self.finished.emit(None)
+            else:
+                self.finished.emit(result_generator)
         except Exception as e:
             self.error.emit(e)
         finally:
@@ -101,6 +104,11 @@ class TaskSeekerApp(QObject):
         self.ocr_thread = None
         self.api_thread = None
 
+    def on_screenshot_canceled(self):
+        """处理截图取消时的清理"""
+        self.tray.show()  # 恢复托盘显示
+        QApplication.processEvents()  # 确保UI更新
+
     def _connect_signals(self):
         """连接信号与槽"""
         # 系统托盘
@@ -115,6 +123,7 @@ class TaskSeekerApp(QObject):
 
         # 截屏组件
         self.capture.captured.connect(self.handle_screenshot)
+        self.capture.canceled.connect(self.on_screenshot_canceled)
         self.capture.canceled.connect(lambda: logging.info("截屏取消"))
 
         # API组件
@@ -184,6 +193,8 @@ class TaskSeekerApp(QObject):
         try:
             self.current_screenshot = img
             logging.info("截屏完成，开始OCR处理")
+
+            self.tray.show()
             
             # 停止现有OCR线程
             self._safe_stop_thread(self._ocr_worker, self.ocr_thread)
@@ -196,7 +207,8 @@ class TaskSeekerApp(QObject):
             weak_self = weakref.proxy(self)
             self.ocr_thread.started.connect(self._ocr_worker.run)
             self._ocr_worker.finished.connect(
-                lambda text: weak_self.text_received.emit(text))
+                lambda text: weak_self.text_received.emit(text) if text is not None else None
+            )
             self._ocr_worker.error.connect(
                 lambda e: logging.error(f"OCR错误: {str(e)}"))
             
@@ -208,6 +220,9 @@ class TaskSeekerApp(QObject):
             self.ocr_thread.start()
         except Exception as e:
             logging.error(f"OCR处理失败: {str(e)}")
+        finally:
+            self.tray.show()  # 确保显示托盘
+            QApplication.processEvents()
 
     def process_text_selection(self):
         """处理划词查询"""
@@ -254,7 +269,7 @@ class TaskSeekerApp(QObject):
             # 启动流程
             self.floating_window.start_streaming(text)
             self.api_thread.start()
-            
+
     def store_window_position(self, pos: QPoint):
         """记录窗口最后位置"""
         self.last_query_position = pos

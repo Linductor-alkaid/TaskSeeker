@@ -151,11 +151,6 @@ class FloatingWindow(QWidget):
         """最终状态处理"""
         self.stream_update_timer.stop()
         self._flush_stream_buffer()
-
-        # 添加耗时统计（使用Markdown格式）
-        duration = time.time() - self.stream_start_time
-        self.markdown_content += f"\n\n*响应生成耗时: {duration:.2f}秒*"
-        self.text_edit.setMarkdown(self.markdown_content)
         
         if self.error_occurred:
             duration = time.time() - self.stream_start_time
