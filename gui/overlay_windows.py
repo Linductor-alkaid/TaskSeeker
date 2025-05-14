@@ -25,6 +25,7 @@ class FloatingWindow(QWidget):
         self._load_config()
         self._init_shortcuts()
         self.streaming = False
+        self.markdown_content = ""
         self.stream_buffer = []
         self.stream_start_time = None
         # 连接信号
@@ -150,6 +151,11 @@ class FloatingWindow(QWidget):
         """最终状态处理"""
         self.stream_update_timer.stop()
         self._flush_stream_buffer()
+
+        # 添加耗时统计（使用Markdown格式）
+        duration = time.time() - self.stream_start_time
+        self.markdown_content += f"\n\n*响应生成耗时: {duration:.2f}秒*"
+        self.text_edit.setMarkdown(self.markdown_content)
         
         if self.error_occurred:
             duration = time.time() - self.stream_start_time
@@ -171,16 +177,16 @@ class FloatingWindow(QWidget):
         if not self.stream_buffer or self.error_occurred:
             return
         
-        combined = "".join(self.stream_buffer)
+        self.markdown_content += "".join(self.stream_buffer)
         self.stream_buffer.clear()
         
         # 处理首块替换逻辑
         if self.is_first_chunk:
-            self.text_edit.setPlainText(combined)
+            self.text_edit.setMarkdown(self.markdown_content)
             self.is_first_chunk = False
         else:
             self.text_edit.moveCursor(QTextCursor.End)
-            self.text_edit.insertPlainText(combined)
+            self.text_edit.setMarkdown(self.markdown_content)
         
         # 智能滚动控制
         scrollbar = self.text_edit.verticalScrollBar()
@@ -234,7 +240,8 @@ class FloatingWindow(QWidget):
         if event.key() == Qt.Key_Escape and self.streaming:
             self.streaming = False
             self.stream_update_timer.stop()
-            self.text_edit.append("\n[用户主动中断]")
+            self.markdown_content += "\n\n*[用户主动中断]*"  # 使用Markdown格式
+            self.text_edit.setMarkdown(self.markdown_content)
             self._finalize_stream()
             # 发射中断信号给后台
             self.stream_finished.emit()  
