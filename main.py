@@ -138,11 +138,12 @@ class TaskSeekerApp(QObject):
         # 执行API请求
         try:
             response = self.api.generate_response(text)
-            self.floating_window.update_content(response)
+            self.floating_window.show_content(response)
             self.floating_window.show()
         except Exception as e:
             logging.error(f"API请求失败: {str(e)}")
-            self.floating_window.show_error("服务暂时不可用")
+            self.floating_window.show_error(f"服务暂时不可用\n错误详情: {str(e)}")  # 显示详细错误
+            self.floating_window.show_content(str(e))
 
     def store_window_position(self, pos: QPoint):
         """记录窗口最后位置"""
@@ -181,11 +182,7 @@ class TaskSeekerApp(QObject):
             self.ocr.__init__()
             
             # 界面样式更新
-            self.floating_window.update_style(
-                font_size=global_config.get("appearance.font_size"),
-                bg_color=global_config.get("appearance.background"),
-                text_color=global_config.get("appearance.text_color")
-            )
+            self.floating_window.update_style()
         except Exception as e:
             logging.error(f"配置重载失败: {str(e)}")
 

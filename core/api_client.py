@@ -5,11 +5,13 @@ from config import global_config
 from pkg.deepseek.client import DeepSeekClient
 from pkg.deepseek.errors import AuthenticationError, RateLimitError, APIError
 from pkg.deepseek.utils.retry import deepseek_retry
+from pkg.deepseek.configs import get_config
 
 logger = logging.getLogger(__name__)
 
 class DeepSeekAPI:
     def __init__(self):
+        self.config = get_config()
         self._init_client()
         self._max_retries = global_config.get("api.max_retries", 3)
         self._timeout = global_config.get("api.timeout", 30)
@@ -33,7 +35,7 @@ class DeepSeekAPI:
         return {
             "temperature": global_config.get("api.temperature", 0.7),
             "max_tokens": global_config.get("api.max_tokens", 1024),
-            "top_p": global_config.get("api.top_p", 1.0),
+            # "top_p": global_config.get("api.top_p", 1.0),
         }
 
     @deepseek_retry
@@ -55,7 +57,7 @@ class DeepSeekAPI:
         """
         try:
             response = self.client.chat(
-                message=prompt,
+                usermessages=prompt,
                 stream=stream,
                 **self.default_params
             )

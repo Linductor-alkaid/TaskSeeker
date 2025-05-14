@@ -1,15 +1,19 @@
 # gui/overlay_windows.py
-from PyQt5.QtCore import Qt, QPoint, QTimer, pyqtSignal, QSize, QEvent
+from PyQt5.QtCore import Qt, QPoint, QTimer, pyqtSignal, QSize, QEvent, QRectF
 from PyQt5.QtWidgets import (QWidget, QTextEdit, QApplication, QPushButton, 
                              QScrollArea, QVBoxLayout, QSizeGrip, QMenu)
 from PyQt5.QtGui import (QPainter, QColor, QPen, QCursor, QFont, QLinearGradient,
-                        QBrush, QTextCursor, QKeyEvent)
+                        QBrush, QTextCursor, QKeyEvent, QPainterPath)
+from PyQt5.QtWidgets import QGraphicsOpacityEffect  # 用于复制反馈动画
+from PyQt5.QtCore import QPropertyAnimation, QAbstractAnimation  # 用于动画系统
 from config import global_config
 
 class FloatingWindow(QWidget):
     closed = pyqtSignal()
-    hidden = pyqtSignal()
+    window_hidden = pyqtSignal()
     shown = pyqtSignal()
+    copy_requested = pyqtSignal(str)
+    error_occurred = pyqtSignal(str)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -116,6 +120,44 @@ class FloatingWindow(QWidget):
         """初始化快捷键"""
         self.text_edit.keyPressEvent = self._on_key_press
 
+    def update_style(self):
+        """重新加载外观配置"""
+        self._load_config()  # 复用已有的配置加载逻辑
+        self._apply_shadow_effect()
+        self.update()
+
+    def show_loading(self):
+        """显示加载状态"""
+        self.text_edit.setPlainText("加载中...")
+        self.adjust_size()
+        self.show()
+        self.activateWindow()
+    
+    def show_error(self, message: str):
+        """显示错误信息"""
+        error_style = """
+            #container {
+                background: rgba(255, 220, 220, 0.95);
+                border: 1px solid rgba(200, 100, 100, 150);
+            }
+            QTextEdit {
+                color: #cc0000;
+            }
+        """
+        self.container.setStyleSheet(error_style + self.container.styleSheet())
+        self.text_edit.setPlainText(f"⚠️ 错误: {message}")
+        self.adjust_size()
+        self.show()
+        self.activateWindow()
+        
+        # 5秒后恢复原始样式
+        QTimer.singleShot(5000, self._restore_style)
+
+    def _restore_style(self):
+        """恢复默认样式"""
+        self._load_config()
+        self.update()
+
     def _on_key_press(self, event: QKeyEvent):
         """自定义快捷键处理"""
         # 复制文本
@@ -175,7 +217,7 @@ class FloatingWindow(QWidget):
         doc.setTextWidth(self.text_edit.viewport().width())
         height = int(doc.size().height() + 25)
         
-        max_height = QApplication.desktop().availableGeometry().height() * 0.7
+        max_height = int(QApplication.desktop().availableGeometry().height() * 0.7)
         self.resize(self.width(), min(height, max_height))
 
     def mousePressEvent(self, event):
@@ -198,8 +240,8 @@ class FloatingWindow(QWidget):
             self.move(event.globalPos() - self.offset)
         elif self.resizing:
             delta = event.globalPos() - self.resize_start_pos
-            new_width = self.resize_initial_size.width() + delta.x()
-            new_height = self.resize_initial_size.height() + delta.y()
+            new_width = int(self.resize_initial_size.width() + delta.x())
+            new_height = int(self.resize_initial_size.height() + delta.y())
             self.resize(max(200, new_width), max(150, new_height))
             self.shadow.setGeometry(5, 5, self.width()-10, self.height()-10)
         else:
@@ -277,8 +319,11 @@ class FloatingWindow(QWidget):
 
     def copy_text(self):
         """复制选中文本"""
-        self.text_edit.copy()
-        # 显示复制反馈动画
+        cursor = self.text_edit.textCursor()
+        selected_text = cursor.selectedText()
+        if selected_text:
+            self.text_edit.copy()
+            self.copy_requested.emit(selected_text)  # 发射带文本参数的信号
         self._show_copy_feedback()
 
     def _show_copy_feedback(self):
@@ -300,7 +345,7 @@ class FloatingWindow(QWidget):
             self.last_size = self.size()
             self.hide()
             self.hidden_state = True
-            self.hidden.emit()
+            self.window_hidden.emit()
 
     def show_window(self):
         """恢复显示窗口"""
@@ -339,18 +384,21 @@ class FloatingWindow(QWidget):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing)
         
-        # 绘制模糊背景
+        # 修复点：将QRect转换为QRectF
+        rect_f = QRectF(self.rect())  # 转换原始矩形为浮点版本
+        adjusted_rect = rect_f.adjusted(1, 1, -1, -1)  # 使用浮点调整
+        
         path = QPainterPath()
-        path.addRoundedRect(self.rect().adjusted(1,1,-1,-1), 5,5)
+        path.addRoundedRect(adjusted_rect, 5, 5)  # 现在参数类型正确
         
         painter.setClipPath(path)
-        painter.fillRect(self.rect(), QColor(0, 0, 0, 30))
+        painter.fillRect(rect_f, QColor(0, 0, 0, 30))
         
         # 绘制边框
         pen = QPen(QColor(200, 200, 200, 120))
         pen.setWidth(1)
         painter.setPen(pen)
-        painter.drawRoundedRect(self.rect().adjusted(0,0,-1,-1), 5,5)
+        painter.drawRoundedRect(adjusted_rect, 5, 5)
 
 if __name__ == "__main__":
     # 测试代码

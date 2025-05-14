@@ -49,12 +49,12 @@ class DeepSeekClient:
         raise error
 
     @deepseek_retry
-    def chat(self, usermassages, max_tokens=1024, temperature=0.8, stream=False):
+    def chat(self, usermessages, max_tokens=1024, temperature=0.8, stream=False):
         try:
             messages = []
             if self.system_prompt:
                 messages.append({"role": "system", "content": self.system_prompt})
-            messages.append({"role": "user", "content": usermassages})
+            messages.append({"role": "user", "content": usermessages})
             
             self.messages.extend(messages)  # 保留历史记录
             response = self.client.chat.completions.create(
