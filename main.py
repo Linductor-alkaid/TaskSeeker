@@ -3,7 +3,7 @@ import numpy as np
 import sys
 import logging
 from PyQt5.QtWidgets import QApplication, QMessageBox
-from PyQt5.QtCore import QObject, pyqtSignal, QTimer, Qt, QPoint
+from PyQt5.QtCore import QObject, pyqtSignal, QTimer, Qt, QPoint, QThread, QMutex
 from config import global_config
 from gui.tray_icon import SystemTray
 from core.hotkey_manager import HotkeyManager
@@ -23,6 +23,27 @@ logging.basicConfig(
         logging.StreamHandler()
     ]
 )
+
+class Worker(QObject):
+    finished = pyqtSignal(object)
+    error = pyqtSignal(Exception)
+    
+    def __init__(self, task, *args, **kwargs):
+        super().__init__()
+        self.task = task
+        self.args = args
+        self.kwargs = kwargs
+        self.mutex = QMutex()
+
+    def run(self):
+        try:
+            self.mutex.lock()
+            result = self.task(*self.args, **self.kwargs)
+            self.finished.emit(result)
+        except Exception as e:
+            self.error.emit(e)
+        finally:
+            self.mutex.unlock()
 
 class TaskSeekerApp(QObject):
     api_ready = pyqtSignal(bool)
@@ -51,6 +72,10 @@ class TaskSeekerApp(QObject):
         # 状态变量
         self.last_query_position = None
         self.current_screenshot = None
+
+        # 线程控制
+        self.ocr_thread = None
+        self.api_thread = None
 
     def _connect_signals(self):
         """连接信号与槽"""
@@ -111,8 +136,27 @@ class TaskSeekerApp(QObject):
         try:
             self.current_screenshot = img
             logging.info("开始OCR识别...")
-            text = self.ocr.recognize_text(img)
-            self.text_received.emit(text)
+            
+            # 终止已存在的线程
+            if self.ocr_thread and self.ocr_thread.isRunning():
+                self.ocr_thread.quit()
+                self.ocr_thread.wait()
+
+            # 创建新线程
+            self.ocr_thread = QThread()
+            self.ocr_worker = Worker(self.ocr.recognize_text, img)
+            self.ocr_worker.moveToThread(self.ocr_thread)
+            
+            # 信号连接
+            self.ocr_thread.started.connect(self.ocr_worker.run)
+            self.ocr_worker.finished.connect(self.text_received.emit)
+            self.ocr_worker.error.connect(lambda e: logging.error(f"OCR错误: {str(e)}"))
+            self.ocr_worker.finished.connect(self.ocr_thread.quit)
+            self.ocr_worker.finished.connect(self.ocr_worker.deleteLater)
+            self.ocr_thread.finished.connect(self.ocr_thread.deleteLater)
+            
+            # 启动线程
+            self.ocr_thread.start()
         except Exception as e:
             logging.error(f"OCR处理失败: {str(e)}")
 
@@ -135,15 +179,29 @@ class TaskSeekerApp(QObject):
         # 显示加载状态
         self.floating_window.show_loading()
         
-        # 执行API请求
-        try:
-            response = self.api.generate_response(text)
-            self.floating_window.show_content(response)
-            self.floating_window.show()
-        except Exception as e:
-            logging.error(f"API请求失败: {str(e)}")
-            self.floating_window.show_error(f"服务暂时不可用\n错误详情: {str(e)}")  # 显示详细错误
-            self.floating_window.show_content(str(e))
+        # 终止已存在的API线程
+        if self.api_thread and self.api_thread.isRunning():
+            self.api_thread.quit()
+            self.api_thread.wait()
+
+        # 创建新线程
+        self.api_thread = QThread()
+        self.api_worker = Worker(self.api.generate_response, text)
+        self.api_worker.moveToThread(self.api_thread)
+        
+        # 信号连接
+        self.api_thread.started.connect(self.api_worker.run)
+        self.api_worker.finished.connect(
+            lambda response: self.floating_window.show_content(response))
+        self.api_worker.finished.connect(self.floating_window.show)
+        self.api_worker.error.connect(
+            lambda e: self.floating_window.show_error(f"API错误: {str(e)}"))
+        self.api_worker.finished.connect(self.api_thread.quit)
+        self.api_worker.finished.connect(self.api_worker.deleteLater)
+        self.api_thread.finished.connect(self.api_thread.deleteLater)
+        
+        # 启动线程
+        self.api_thread.start()
 
     def store_window_position(self, pos: QPoint):
         """记录窗口最后位置"""
@@ -161,8 +219,25 @@ class TaskSeekerApp(QObject):
 
     def show_settings(self):
         """显示设置对话框"""
-        self.settings_dialog.exec_()
-        self._reload_configurations()
+        try:
+            # 确保对话框获得焦点
+            self.settings_dialog.setWindowState(
+                self.settings_dialog.windowState() & ~Qt.WindowMinimized)
+            self.settings_dialog.activateWindow()
+            self.settings_dialog.raise_()
+            
+            # 强制置顶并模态显示
+            self.settings_dialog.setWindowFlags(
+                self.settings_dialog.windowFlags() | Qt.WindowStaysOnTopHint)
+            self.settings_dialog.exec_()
+            
+            # 恢复窗口标志
+            self.settings_dialog.setWindowFlags(
+                self.settings_dialog.windowFlags() & ~Qt.WindowStaysOnTopHint)
+            
+            self._reload_configurations()
+        except Exception as e:
+            logging.error(f"设置窗口异常: {str(e)}")
 
     def _reload_configurations(self):
         """重新加载所有配置"""
@@ -195,6 +270,16 @@ class TaskSeekerApp(QObject):
         """优雅关闭程序"""
         logging.info("开始关闭程序...")
         try:
+            # 终止所有线程
+            if self.ocr_thread and self.ocr_thread.isRunning():
+                self.ocr_thread.quit()
+                self.ocr_thread.wait(1000)
+                
+            if self.api_thread and self.api_thread.isRunning():
+                self.api_thread.quit()
+                self.api_thread.wait(1000)
+                
+            # 原有关闭逻辑...
             self.hotkeys.unregister_all()
             self.capture.close()
             self.floating_window.close()
