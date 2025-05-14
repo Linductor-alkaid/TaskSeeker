@@ -137,10 +137,12 @@ class TaskSeekerApp(QObject):
             self.current_screenshot = img
             logging.info("开始OCR识别...")
             
-            # 终止已存在的线程
-            if self.ocr_thread and self.ocr_thread.isRunning():
-                self.ocr_thread.quit()
-                self.ocr_thread.wait()
+            # 终止已存在的线程并清除引用
+            if self.ocr_thread is not None:
+                if self.ocr_thread.isRunning():
+                    self.ocr_thread.quit()
+                    self.ocr_thread.wait()
+                self.ocr_thread = None  # 清除旧引用
 
             # 创建新线程
             self.ocr_thread = QThread()
@@ -154,6 +156,7 @@ class TaskSeekerApp(QObject):
             self.ocr_worker.finished.connect(self.ocr_thread.quit)
             self.ocr_worker.finished.connect(self.ocr_worker.deleteLater)
             self.ocr_thread.finished.connect(self.ocr_thread.deleteLater)
+            self.ocr_thread.finished.connect(lambda: setattr(self, 'ocr_thread', None))  # 新增
             
             # 启动线程
             self.ocr_thread.start()
@@ -179,10 +182,12 @@ class TaskSeekerApp(QObject):
         # 显示加载状态
         self.floating_window.show_loading()
         
-        # 终止已存在的API线程
-        if self.api_thread and self.api_thread.isRunning():
-            self.api_thread.quit()
-            self.api_thread.wait()
+        # 终止已存在的API线程并清除引用
+        if self.api_thread is not None:
+            if self.api_thread.isRunning():
+                self.api_thread.quit()
+                self.api_thread.wait()
+            self.api_thread = None  # 清除旧引用
 
         # 创建新线程
         self.api_thread = QThread()
@@ -199,6 +204,7 @@ class TaskSeekerApp(QObject):
         self.api_worker.finished.connect(self.api_thread.quit)
         self.api_worker.finished.connect(self.api_worker.deleteLater)
         self.api_thread.finished.connect(self.api_thread.deleteLater)
+        self.api_thread.finished.connect(lambda: setattr(self, 'api_thread', None))  # 新增
         
         # 启动线程
         self.api_thread.start()
