@@ -100,20 +100,21 @@ class FloatingWindow(QWidget):
 
     def _load_config(self):
         """加载外观配置"""
-        # 字体样式
-        font = QFont()
-        font.setPixelSize(global_config.get("appearance.font_size", 14))
-        self.text_edit.setFont(font)
+        # 确保正确解析颜色值
+        bg_str = global_config.get("appearance.background", "rgba(245,245,245,0.9)")
+        bg_color = QColor()
+        if not bg_color.setNamedColor(bg_str):
+            if 'rgba' in bg_str:
+                parts = [int(x) for x in bg_str[5:-1].split(',')[:3]]
+                alpha = int(float(bg_str.split(',')[-1].strip()[:-1])*255)
+                bg_color = QColor(*parts, alpha)
+            else:
+                bg_color = QColor(245, 245, 245, 230)
         
-        # 颜色配置
         self.text_color = QColor(global_config.get("appearance.text_color", "#333333"))
-        bg_color = QColor(global_config.get("appearance.background", "rgba(245,245,245,0.9)"))
+        if not self.text_color.isValid():
+            self.text_color = QColor("#333333")
         
-        # 透明度
-        opacity = global_config.get("appearance.window_opacity", 0.95)
-        self.setWindowOpacity(opacity)
-        
-        # 应用样式
         self._update_stylesheet(bg_color, self.text_color)
 
     def _init_shortcuts(self):

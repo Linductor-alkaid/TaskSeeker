@@ -1,9 +1,10 @@
 # main.py
+import weakref
 import numpy as np
 import sys
 import logging
 from PyQt5.QtWidgets import QApplication, QMessageBox
-from PyQt5.QtCore import QObject, pyqtSignal, QTimer, Qt, QPoint, QThread, QMutex
+from PyQt5.QtCore import QObject, pyqtSignal, QTimer, Qt, QPoint, QThread, QMutex, QMutexLocker
 from config import global_config
 from gui.tray_icon import SystemTray
 from core.hotkey_manager import HotkeyManager
@@ -33,17 +34,28 @@ class Worker(QObject):
         self.task = task
         self.args = args
         self.kwargs = kwargs
-        self.mutex = QMutex()
+        self._mutex = QMutex(QMutex.Recursive)
+        self._active = True
 
     def run(self):
         try:
-            self.mutex.lock()
+            if not self._mutex.tryLock(100):
+                raise TimeoutError("获取线程锁超时")
+            
+            if not self._active:
+                return
+            
             result = self.task(*self.args, **self.kwargs)
             self.finished.emit(result)
         except Exception as e:
             self.error.emit(e)
         finally:
-            self.mutex.unlock()
+            self._mutex.unlock()
+
+    def cancel(self):
+        self._mutex.lock()
+        self._active = False
+        self._mutex.unlock()
 
 class TaskSeekerApp(QObject):
     api_ready = pyqtSignal(bool)
@@ -55,6 +67,11 @@ class TaskSeekerApp(QObject):
         self._init_components()
         self._connect_signals()
         self._pending_actions = {}
+        self.api_thread = None
+        self.ocr_thread = None
+        self._api_worker = None
+        self._ocr_worker = None
+        self.thread_lock = QMutex(QMutex.Recursive)
 
     def _init_components(self):
         """初始化所有组件"""
@@ -104,6 +121,30 @@ class TaskSeekerApp(QObject):
         self.floating_window.window_hidden.connect(self.store_window_position)
         self.floating_window.copy_requested.connect(self.copy_to_clipboard)
 
+    def _safe_stop_thread(self, worker, thread):
+        """增强型线程终止方法"""
+        if thread is not None and isinstance(thread, QThread):
+            try:
+                if worker is not None:
+                    worker.cancel()
+                thread.quit()
+                if not thread.wait(1500):
+                    thread.terminate()
+                    thread.wait()
+            except RuntimeError as e:
+                logging.warning(f"线程终止异常: {str(e)}")
+            finally:
+                if worker is not None:
+                    worker.deleteLater()
+                thread.deleteLater()
+                # 显式重置引用
+                if thread is self.api_thread:
+                    self.api_thread = None
+                    self._api_worker = None
+                elif thread is self.ocr_thread:
+                    self.ocr_thread = None
+                    self._ocr_worker = None
+
     def check_api_connection(self):
         """启动时验证API连接"""
         if not self.api.validate_config():
@@ -135,30 +176,28 @@ class TaskSeekerApp(QObject):
         """处理截屏结果"""
         try:
             self.current_screenshot = img
-            logging.info("开始OCR识别...")
+            logging.info("截屏完成，开始OCR处理")
             
-            # 终止已存在的线程并清除引用
-            if self.ocr_thread is not None:
-                if self.ocr_thread.isRunning():
-                    self.ocr_thread.quit()
-                    self.ocr_thread.wait()
-                self.ocr_thread = None  # 清除旧引用
-
-            # 创建新线程
+            # 停止现有OCR线程
+            self._safe_stop_thread(self._ocr_worker, self.ocr_thread)
+            
             self.ocr_thread = QThread()
-            self.ocr_worker = Worker(self.ocr.recognize_text, img)
-            self.ocr_worker.moveToThread(self.ocr_thread)
+            self._ocr_worker = Worker(self.ocr.recognize_text, img)
+            self._ocr_worker.moveToThread(self.ocr_thread)
             
-            # 信号连接
-            self.ocr_thread.started.connect(self.ocr_worker.run)
-            self.ocr_worker.finished.connect(self.text_received.emit)
-            self.ocr_worker.error.connect(lambda e: logging.error(f"OCR错误: {str(e)}"))
-            self.ocr_worker.finished.connect(self.ocr_thread.quit)
-            self.ocr_worker.finished.connect(self.ocr_worker.deleteLater)
-            self.ocr_thread.finished.connect(self.ocr_thread.deleteLater)
-            self.ocr_thread.finished.connect(lambda: setattr(self, 'ocr_thread', None))  # 新增
+            # 使用弱引用避免循环引用
+            weak_self = weakref.proxy(self)
+            self.ocr_thread.started.connect(self._ocr_worker.run)
+            self._ocr_worker.finished.connect(
+                lambda text: weak_self.text_received.emit(text))
+            self._ocr_worker.error.connect(
+                lambda e: logging.error(f"OCR错误: {str(e)}"))
             
-            # 启动线程
+            # 自动清理资源
+            self._ocr_worker.finished.connect(self.ocr_thread.quit)
+            self.ocr_thread.finished.connect(
+                lambda: self._safe_stop_thread(weak_self._ocr_worker, weak_self.ocr_thread))
+            
             self.ocr_thread.start()
         except Exception as e:
             logging.error(f"OCR处理失败: {str(e)}")
@@ -175,39 +214,35 @@ class TaskSeekerApp(QObject):
             logging.error(f"文本选择失败: {str(e)}")
 
     def handle_query_text(self, text: str):
-        """处理待查询文本"""
+        """处理查询文本"""
         if not text.strip():
             return
 
-        # 显示加载状态
-        self.floating_window.show_loading()
-        
-        # 终止已存在的API线程并清除引用
-        if self.api_thread is not None:
-            if self.api_thread.isRunning():
-                self.api_thread.quit()
-                self.api_thread.wait()
-            self.api_thread = None  # 清除旧引用
-
-        # 创建新线程
-        self.api_thread = QThread()
-        self.api_worker = Worker(self.api.generate_response, text)
-        self.api_worker.moveToThread(self.api_thread)
-        
-        # 信号连接
-        self.api_thread.started.connect(self.api_worker.run)
-        self.api_worker.finished.connect(
-            lambda response: self.floating_window.show_content(response))
-        self.api_worker.finished.connect(self.floating_window.show)
-        self.api_worker.error.connect(
-            lambda e: self.floating_window.show_error(f"API错误: {str(e)}"))
-        self.api_worker.finished.connect(self.api_thread.quit)
-        self.api_worker.finished.connect(self.api_worker.deleteLater)
-        self.api_thread.finished.connect(self.api_thread.deleteLater)
-        self.api_thread.finished.connect(lambda: setattr(self, 'api_thread', None))  # 新增
-        
-        # 启动线程
-        self.api_thread.start()
+        with QMutexLocker(self.thread_lock):
+            # 停止现有API线程
+            self._safe_stop_thread(self._api_worker, self.api_thread)
+            
+            self.api_thread = QThread()
+            self._api_worker = Worker(self.api.generate_response, text)
+            self._api_worker.moveToThread(self.api_thread)
+            
+            # 使用正确的弱引用对象
+            weak_self = weakref.proxy(self)
+            weak_window = weakref.proxy(self.floating_window)
+            
+            self.api_thread.started.connect(self._api_worker.run)
+            self._api_worker.finished.connect(
+                lambda result: weak_window.show_content(result))
+            self._api_worker.error.connect(
+                lambda e: weak_window.show_error(str(e)))
+            
+            # 修正信号连接：使用TaskSeekerApp的弱引用
+            self._api_worker.finished.connect(self.api_thread.quit)
+            self.api_thread.finished.connect(
+                lambda: weak_self._safe_stop_thread(weak_self._api_worker, weak_self.api_thread))  # 修正此处
+            
+            self.floating_window.show_loading()
+            self.api_thread.start()
 
     def store_window_position(self, pos: QPoint):
         """记录窗口最后位置"""
@@ -276,21 +311,16 @@ class TaskSeekerApp(QObject):
         """优雅关闭程序"""
         logging.info("开始关闭程序...")
         try:
-            # 终止所有线程
-            if self.ocr_thread and self.ocr_thread.isRunning():
-                self.ocr_thread.quit()
-                self.ocr_thread.wait(1000)
-                
-            if self.api_thread and self.api_thread.isRunning():
-                self.api_thread.quit()
-                self.api_thread.wait(1000)
-                
-            # 原有关闭逻辑...
+            # 按照依赖顺序关闭
+            self._safe_stop_thread(self._ocr_worker, self.ocr_thread)
+            self._safe_stop_thread(self._api_worker, self.api_thread)
+            
             self.hotkeys.unregister_all()
             self.capture.close()
             self.floating_window.close()
             self.tray.hide()
-            QTimer.singleShot(1000, QApplication.instance().quit)
+            
+            QTimer.singleShot(1000, lambda: QApplication.instance().quit())
         except Exception as e:
             logging.critical(f"关闭失败: {str(e)}")
             sys.exit(1)

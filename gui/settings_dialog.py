@@ -134,6 +134,12 @@ class SettingsDialog(QDialog):
         # 系统提示
         self.system_prompt_edit.setText(global_config.get("api.system_prompt", ""))
 
+        bg_color = QColor(global_config.get("appearance.background", "#F5F5F5"))
+        self.bg_color_btn.setStyleSheet(f"background-color: {bg_color.name(QColor.HexArgb)};")
+        
+        text_color = QColor(global_config.get("appearance.text_color", "#333333"))
+        self.text_color_btn.setStyleSheet(f"background-color: {text_color.name(QColor.HexArgb)};")
+
     def _connect_signals(self):
         """连接信号与槽"""
         self.bg_color_btn.clicked.connect(lambda: self._pick_color("background"))
@@ -160,7 +166,7 @@ class SettingsDialog(QDialog):
             btn = self.bg_color_btn if color_type == "background" else self.text_color_btn
             btn.setStyleSheet(f"background-color: {color.name(QColor.HexArgb)};")
             # 暂时保存颜色值，直到用户点击保存
-            setattr(self, f"_{color_type}_color", color)
+            setattr(self, f"_{color_type.replace('.', '_')}", color)
 
     def _validate_settings(self):
         """验证输入有效性"""
@@ -198,12 +204,12 @@ class SettingsDialog(QDialog):
             global_config.set("api.temperature", self.temperature_spin.value())
             
             # 外观
-            if hasattr(self, "_background_color"):
+            if hasattr(self, "_background"):
                 global_config.set("appearance.background",
-                    self._qcolor_to_rgba(self._background_color))
-            if hasattr(self, "_text_color_color"):
+                    self._qcolor_to_rgba(self._background))
+            if hasattr(self, "_text_color"):
                 global_config.set("appearance.text_color",
-                    self._qcolor_to_rgba(self._text_color_color))
+                    self._qcolor_to_rgba(self._text_color))
             global_config.set("appearance.font_size", self.font_size_spin.value())
             global_config.set("appearance.window_opacity", self.opacity_spin.value() / 100)
             
@@ -228,7 +234,9 @@ class SettingsDialog(QDialog):
 
     @staticmethod
     def _qcolor_to_rgba(color: QColor) -> str:
-        """将QColor转换为rgba字符串"""
+        """支持多种格式的转换"""
+        if color.alpha() == 255:
+            return color.name()
         return f"rgba({color.red()}, {color.green()}, {color.blue()}, {color.alpha()/255:.2f})"
 
 if __name__ == "__main__":
