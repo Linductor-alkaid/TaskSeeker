@@ -326,7 +326,7 @@ class FloatingWindow(QWidget):
         self.activateWindow()
 
     def adjust_size(self):
-        """带节流机制的尺寸调整"""
+        """带节流机制的尺寸调整（修复闪动问题）"""
         if not hasattr(self, "_last_adjust"):
             self._last_adjust = 0
         
@@ -335,12 +335,37 @@ class FloatingWindow(QWidget):
         if now - self._last_adjust < 0.2:
             return
         
-        doc = self.text_edit.document()
-        doc.setTextWidth(self.text_edit.viewport().width())
-        height = int(doc.size().height() + 25)
+        # 保存当前滚动位置
+        scrollbar = self.text_edit.verticalScrollBar()
+        old_scroll_value = scrollbar.value()
+        was_at_bottom = scrollbar.value() >= scrollbar.maximum() - 50
         
-        max_height = int(QApplication.desktop().availableGeometry().height() * 0.7)
-        self.resize(self.width(), min(height, max_height))
+        doc = self.text_edit.document()
+        viewport_width = self.text_edit.viewport().width()
+        
+        # 精确计算理想高度
+        doc.setTextWidth(viewport_width)
+        ideal_height = doc.size().height() + 25  # 加上padding
+        screen_height = QApplication.desktop().availableGeometry().height()
+        new_height = min(int(ideal_height), int(screen_height * 0.7))
+        
+        # 只有当高度变化超过5像素时才调整
+        if abs(self.height() - new_height) > 5:
+            # 冻结UI更新
+            self.text_edit.setUpdatesEnabled(False)
+            
+            # 保持底部自动滚动状态
+            self.resize(self.width(), new_height)
+            
+            # 解冻UI更新
+            self.text_edit.setUpdatesEnabled(True)
+            
+            # 恢复滚动位置
+            if was_at_bottom:
+                scrollbar.setValue(scrollbar.maximum())
+            else:
+                scrollbar.setValue(old_scroll_value)
+        
         self._last_adjust = now
 
     def mousePressEvent(self, event):

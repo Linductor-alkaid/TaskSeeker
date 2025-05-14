@@ -1,6 +1,6 @@
 # TaskSeeker - 跨平台智能效率工具
 
-![TaskSeeker Demo](demo.gif) <!-- 建议后续补充实际截图 -->
+![TaskSeeker Demo](assets/demo.png)
 
 **突破平台限制的智能助手 | 划词翻译·OCR识别·AI增强**
 
