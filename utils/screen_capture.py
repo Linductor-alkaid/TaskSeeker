@@ -2,7 +2,7 @@
 import numpy as np
 from PyQt5.QtCore import Qt, QRect, QPoint, pyqtSignal
 from PyQt5.QtWidgets import QWidget, QApplication
-from PyQt5.QtGui import QPainter, QColor, QPen, QCursor
+from PyQt5.QtGui import QPainter, QColor, QPen, QCursor, QScreen
 import mss
 
 class ScreenCapture(QWidget):
@@ -12,7 +12,7 @@ class ScreenCapture(QWidget):
     def __init__(self):
         super().__init__()
         self.init_ui()
-        self.init_screen_params()
+        self.current_screen_geometry = QRect()
 
     def init_ui(self):
         """初始化无边框透明窗口"""
@@ -25,36 +25,18 @@ class ScreenCapture(QWidget):
         self.selection_end = QPoint()
         self.is_dragging = False
 
-    def init_screen_params(self):
-        """计算多显示器虚拟桌面范围"""
-        self.screens = []
-        desktop = QRect()
-        for screen in QApplication.screens():
-            geometry = screen.geometry()
-            desktop = desktop.united(geometry)
-            self.screens.append({
-                "left": geometry.x(),
-                "top": geometry.y(),
-                "width": geometry.width(),
-                "height": geometry.height()
-            })
-        
-        # 设置虚拟桌面参数
-        self.virtual_desktop = {
-            "left": desktop.x(),
-            "top": desktop.y(),
-            "width": desktop.width(),
-            "height": desktop.height()
-        }
-
     def start_capture(self):
-        """覆盖整个虚拟桌面"""
-        self.setGeometry(
-            self.virtual_desktop["left"],
-            self.virtual_desktop["top"],
-            self.virtual_desktop["width"],
-            self.virtual_desktop["height"]
-        )
+        """覆盖当前显示器"""
+        # 获取鼠标所在屏幕
+        current_screen = QApplication.screenAt(QCursor.pos())
+        if not current_screen:
+            current_screen = QApplication.primaryScreen()
+        
+        # 记录当前屏幕参数
+        self.current_screen_geometry = current_screen.geometry()
+        
+        # 设置窗口尺寸为当前屏幕尺寸
+        self.setGeometry(self.current_screen_geometry)
         self.show()
         self.activateWindow()
         self.raise_()
@@ -138,9 +120,10 @@ class ScreenCapture(QWidget):
     def capture_selection(self):
         """跨显示器截图支持"""
         rect = self.normalized_rect()
+        # 转换为全局坐标（基于当前显示器位置）
         global_rect = (
-            self.virtual_desktop["left"] + rect.x(),
-            self.virtual_desktop["top"] + rect.y(),
+            self.current_screen_geometry.x() + rect.x(),
+            self.current_screen_geometry.y() + rect.y(),
             rect.width(),
             rect.height()
         )
