@@ -6,6 +6,7 @@ from PyQt5.QtWidgets import (QDialog, QTabWidget, QWidget, QVBoxLayout, QHBoxLay
 from PyQt5.QtGui import QColor, QKeySequence
 from PyQt5.QtCore import Qt, pyqtSignal
 from config import global_config
+import platform
 
 class SettingsDialog(QDialog):
     config_updated = pyqtSignal()
@@ -42,11 +43,17 @@ class SettingsDialog(QDialog):
         # 外观设置
         self.bg_color_btn = QPushButton("选择颜色")
         self.text_color_btn = QPushButton("选择颜色")
+        color_btn_style = "border: 1px solid #808080; padding: 4px;"
+        self.bg_color_btn.setStyleSheet(color_btn_style)
+        self.text_color_btn.setStyleSheet(color_btn_style)
         self.font_size_spin = QSpinBox()
         self.font_size_spin.setRange(8, 36)
         self.opacity_spin = QSpinBox()
         self.opacity_spin.setRange(10, 100)
         self.opacity_spin.setSuffix("%")
+        self.bg_opacity_spin = QSpinBox()
+        self.bg_opacity_spin.setRange(0, 100)
+        self.bg_opacity_spin.setSuffix("%")
         
         # 系统提示
         self.system_prompt_edit = QTextEdit()
@@ -81,9 +88,10 @@ class SettingsDialog(QDialog):
         appearance_tab = QWidget()
         appearance_layout = QFormLayout()
         appearance_layout.addRow("背景颜色:", self.bg_color_btn)
+        appearance_layout.addRow("背景不透明度:", self.bg_opacity_spin)
         appearance_layout.addRow("文字颜色:", self.text_color_btn)
         appearance_layout.addRow("字体大小:", self.font_size_spin)
-        appearance_layout.addRow("窗口透明度:", self.opacity_spin)
+        appearance_layout.addRow("窗口不透明度:", self.opacity_spin)
         appearance_tab.setLayout(appearance_layout)
         
         # 系统提示标签页
@@ -129,6 +137,8 @@ class SettingsDialog(QDialog):
         
         # 外观
         self.font_size_spin.setValue(global_config.get("appearance.font_size"))
+        bg_opacity = int(global_config.get("appearance.background_opacity", 1.0) * 100)
+        self.bg_opacity_spin.setValue(bg_opacity)
         self.opacity_spin.setValue(int(global_config.get("appearance.window_opacity", 95) * 100))
         
         # 系统提示
@@ -164,7 +174,12 @@ class SettingsDialog(QDialog):
         if color.isValid():
             # 实时更新按钮颜色预览
             btn = self.bg_color_btn if color_type == "background" else self.text_color_btn
-            btn.setStyleSheet(f"background-color: {color.name(QColor.HexArgb)};")
+            # 保留原有样式的同时保持边框等设置
+            btn.setStyleSheet(
+                f"background-color: {color.name(QColor.HexArgb)};"
+                "border: 1px solid #808080;"
+                "padding: 4px;"
+            )
             # 暂时保存颜色值，直到用户点击保存
             setattr(self, f"_{color_type.replace('.', '_')}", color)
 
@@ -207,6 +222,7 @@ class SettingsDialog(QDialog):
             if hasattr(self, "_background"):
                 global_config.set("appearance.background",
                     self._qcolor_to_rgba(self._background))
+            global_config.set("appearance.background_opacity", self.bg_opacity_spin.value() / 100)
             if hasattr(self, "_text_color"):
                 global_config.set("appearance.text_color",
                     self._qcolor_to_rgba(self._text_color))

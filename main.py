@@ -128,7 +128,7 @@ class TaskSeekerApp(QObject):
 
         # API组件
         self.api_ready.connect(self.handle_api_status)
-        self.check_api_connection()
+        # self.check_api_connection()
 
         # 文本处理
         self.text_received.connect(self.handle_query_text)
@@ -318,7 +318,7 @@ class TaskSeekerApp(QObject):
             
             # API配置更新
             self.api.update_config()
-            self.check_api_connection()
+            # self.check_api_connection()
             
             # OCR配置更新
             self.ocr.__init__()

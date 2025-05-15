@@ -39,6 +39,19 @@ class FloatingWindow(QWidget):
         # 配置更新监听
         global_config.config_updated.connect(self._on_config_changed)
 
+        # 交互状态
+        self.dragging = False
+        self.resizing = False
+        self.hidden_state = False
+        self.offset = QPoint()
+        self.resize_edge = None
+        self.last_position = None
+        self.last_size = None
+
+        # 根据操作系统调整边缘检测阈值
+        import platform
+        self.edge_margin = 5 if platform.system() == "Windows" else 8
+
     def _init_ui(self):
         """初始化界面组件"""
         self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.SubWindow)
@@ -98,6 +111,16 @@ class FloatingWindow(QWidget):
         # 窗口阴影效果
         self.setGraphicsEffect(None)  # 禁用继承的样式
         self._apply_shadow_effect()
+
+        # Windows下显示滚动条
+        import platform
+        if platform.system() == "Windows":
+            self.text_edit.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        else:
+            self.text_edit.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        
+        self.text_edit.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.text_edit.customContextMenuRequested.connect(self._show_context_menu)
 
     def _init_state(self):
         """初始化交互状态"""
@@ -195,11 +218,12 @@ class FloatingWindow(QWidget):
         """加载外观配置"""
         # 确保正确解析颜色值
         bg_str = global_config.get("appearance.background", "rgba(245,245,245,0.9)")
+        bg_opacity = global_config.get("appearance.background_opacity", 0.9)
         bg_color = QColor()
         if not bg_color.setNamedColor(bg_str):
             if 'rgba' in bg_str:
                 parts = [int(x) for x in bg_str[5:-1].split(',')[:3]]
-                alpha = int(float(bg_str.split(',')[-1].strip()[:-1])*255)
+                alpha = int(float(bg_opacity)*255)
                 bg_color = QColor(*parts, alpha)
             else:
                 bg_color = QColor(245, 245, 245, 230)
@@ -286,13 +310,21 @@ class FloatingWindow(QWidget):
 
     def _apply_shadow_effect(self):
         """应用窗口阴影效果"""
+        import platform
         self.shadow = QWidget(self)
         self.shadow.setAttribute(Qt.WA_TransparentForMouseEvents)
         self.shadow.setGeometry(5, 5, self.width(), self.height())
-        self.shadow.setStyleSheet("""
+        
+        # Windows下使用更明显的阴影效果
+        if platform.system() == "Windows":
+            shadow_style = "box-shadow: 0 4px 24px rgba(0,0,0,0.2);"
+        else:
+            shadow_style = "box-shadow: 0 2px 12px rgba(0,0,0,0.15);"
+        
+        self.shadow.setStyleSheet(f"""
             background: transparent;
             border-radius: 5px;
-            box-shadow: 0 2px 12px rgba(0,0,0,0.15);
+            {shadow_style}
         """)
         self.shadow.lower()
 
@@ -324,7 +356,12 @@ class FloatingWindow(QWidget):
         self.text_edit.moveCursor(QTextCursor.Start)
         self.adjust_size()
         self.show()
-        self.activateWindow()
+        # Windows需要额外的raise_()确保窗口置顶
+        import platform
+        if platform.system() == "Windows":
+            self.setWindowState(self.windowState() & ~Qt.WindowMinimized)
+            self.raise_()
+            self.activateWindow()
 
     def adjust_size(self):
         """带节流机制的尺寸调整（修复闪动问题）"""
