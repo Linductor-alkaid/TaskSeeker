@@ -4,6 +4,8 @@ import cv2
 import numpy as np
 import logging
 import re
+import os
+import time
 from typing import Optional, Tuple
 from config import global_config
 from PIL import Image, ImageEnhance
@@ -18,6 +20,7 @@ class OCRProcessor:
         self.mathpix_appid = global_config.get('ocr.mathpix_appid', '')
         self.mathpix_key = global_config.get('ocr.mathpix_key', '')
         self.languages = global_config.get('ocr.languages', 'eng+chi_sim')
+        self.test_mode = global_config.get('ocr.test_mode', False)  # 测试模式开关
         
         # 初始化公式检测模型
         self.formula_pattern = re.compile(r'(\$+.*?\$+|\\begin\{.*?}.*?\\end\{.*?})')
@@ -45,16 +48,14 @@ class OCRProcessor:
             img = cv2.cvtColor(np.array(pil_img), cv2.COLOR_RGB2BGR)
             gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
             
-            # 自适应阈值二值化
-            processed = cv2.adaptiveThreshold(
-                gray, 255,
-                cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
-                cv2.THRESH_BINARY, 11, 2
-            )
+            # # 自适应阈值二值化
+            # processed = cv2.adaptiveThreshold(
+            #     gray, 255,
+            #     cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+            #     cv2.THRESH_BINARY, 5, 2
+            # )
             
-            # 降噪处理
-            processed = cv2.medianBlur(processed, 3)
-            return processed
+            return gray
             
         except Exception as e:
             logger.error(f"图像预处理失败: {str(e)}")
@@ -68,6 +69,10 @@ class OCRProcessor:
         try:
             # 预处理图像
             processed = self.preprocess_image(img)
+
+            # 测试模式：保存预处理后的图像
+            if self.test_mode:
+                self._save_processed_image(processed)
             
             # 使用 Tesseract 进行识别
             text = pytesseract.image_to_string(
@@ -88,6 +93,17 @@ class OCRProcessor:
         except Exception as e:
             logger.error(f"OCR 识别失败: {str(e)}")
             return ""
+        
+    def _save_processed_image(self, img: np.ndarray):
+        """保存预处理后的图像到test目录"""
+        try:
+            os.makedirs('test', exist_ok=True)
+            timestamp = int(time.time() * 1000)
+            filename = f'processed_{timestamp}.png'
+            cv2.imwrite(os.path.join('test', filename), img)
+            logger.info(f"已保存预处理图像至: test/{filename}")
+        except Exception as e:
+            logger.error(f"保存预处理图像失败: {str(e)}")
 
     def _postprocess_text(self, text: str) -> str:
         """文本后处理"""

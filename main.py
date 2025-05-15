@@ -228,6 +228,7 @@ class TaskSeekerApp(QObject):
         """处理划词查询"""
         try:
             selected_text = get_selected_text()
+            self.current_screenshot = None
             if selected_text and len(selected_text) > 5000:
                 logging.warning("选中文本过长，已截断前5000字符")
                 selected_text = selected_text[:5000]
@@ -267,8 +268,13 @@ class TaskSeekerApp(QObject):
                 lambda: weak_self._safe_stop_thread(weak_self._api_worker, weak_self.api_thread))
             
             # 启动流程
-            self.floating_window.start_streaming(text)
+            is_ocr = hasattr(self, 'current_screenshot') and self.current_screenshot is not None
+            self.floating_window.start_streaming(text, is_ocr)
             self.api_thread.start()
+
+            # 清除截图缓存（重要！）
+            if is_ocr:
+                self.current_screenshot = None
 
     def store_window_position(self, pos: QPoint):
         """记录窗口最后位置"""

@@ -47,6 +47,8 @@ class FloatingWindow(QWidget):
         self.resize_edge = None
         self.last_position = None
         self.last_size = None
+        self.is_ocr_query = False  
+        self.query_text = ""
 
         # 根据操作系统调整边缘检测阈值
         import platform
@@ -135,8 +137,11 @@ class FloatingWindow(QWidget):
         # 边缘检测阈值
         self.edge_margin = 8
 
-    def start_streaming(self, prompt: str):
+    def start_streaming(self, query_text: str, is_ocr: bool = False):
         """流式启动逻辑"""
+        self.is_ocr_query = is_ocr
+        self.query_text = query_text
+        self._initialize_display()
         self.streaming = True
         self.is_first_chunk = True
         self.stream_buffer = []
@@ -144,6 +149,16 @@ class FloatingWindow(QWidget):
         self.error_occurred = False  # 新增错误状态标志
         self.show_loading()
         self.stream_update_timer.start()
+
+    def _initialize_display(self):
+        """根据查询类型初始化显示内容"""
+        if self.is_ocr_query:
+            initial_content = f"**OCR识别结果**：\n{self.query_text}\n\n---\n**回答**：\n"
+        else:
+            initial_content = f"**问题**：{self.query_text}\n\n**回答**：\n"
+        
+        self.text_edit.setMarkdown(initial_content)
+        self.markdown_content = initial_content
         
     def _append_stream_chunk(self, chunk: str):
         """追加流式内容"""

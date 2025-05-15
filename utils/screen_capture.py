@@ -31,6 +31,8 @@ class ScreenCapture(QWidget):
         current_screen = QApplication.screenAt(QCursor.pos())
         if not current_screen:
             current_screen = QApplication.primaryScreen()
+
+        self.current_screen = current_screen
         
         # 记录当前屏幕参数
         self.current_screen_geometry = current_screen.geometry()
@@ -55,7 +57,7 @@ class ScreenCapture(QWidget):
     def draw_selection_rect(self, painter, rect):
         """优化边框绘制效果"""
         # 半透明填充
-        painter.setBrush(QColor(255, 255, 255, 30))
+        painter.setBrush(QColor(255, 255, 255, 0))
         painter.drawRect(rect)
         
         # 虚线边框
@@ -120,21 +122,23 @@ class ScreenCapture(QWidget):
     def capture_selection(self):
         """跨显示器截图支持"""
         rect = self.normalized_rect()
-        # 转换为全局坐标（基于当前显示器位置）
-        global_rect = (
-            self.current_screen_geometry.x() + rect.x(),
-            self.current_screen_geometry.y() + rect.y(),
-            rect.width(),
-            rect.height()
+        # 获取当前屏幕的缩放比例
+        device_pixel_ratio = self.current_screen.devicePixelRatio() if hasattr(self, 'current_screen') else 1.0
+        # 转换为物理像素坐标
+        phys_rect = (
+            int(self.current_screen_geometry.x() + rect.x() * device_pixel_ratio),
+            int(self.current_screen_geometry.y() + rect.y() * device_pixel_ratio),
+            int(rect.width() * device_pixel_ratio),
+            int(rect.height() * device_pixel_ratio)
         )
         
         try:
             with mss.mss() as sct:
                 screenshot = sct.grab({
-                    "left": global_rect[0],
-                    "top": global_rect[1],
-                    "width": global_rect[2],
-                    "height": global_rect[3]
+                    "left": phys_rect[0],
+                    "top": phys_rect[1],
+                    "width": phys_rect[2],
+                    "height": phys_rect[3]
                 })
                 self.captured.emit(np.array(screenshot))
         except Exception as e:
