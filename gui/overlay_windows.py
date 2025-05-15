@@ -211,16 +211,32 @@ class FloatingWindow(QWidget):
         if not self.stream_buffer or self.error_occurred:
             return
         
+        # 预处理数学公式
+        processed_content = "".join(self.stream_buffer)
+        processed_content = processed_content.replace(r'\$', '$')  # 取消转义
+        
         self.markdown_content += "".join(self.stream_buffer)
         self.stream_buffer.clear()
+
+        # 智能滚动控制
+        scrollbar = self.text_edit.verticalScrollBar()
+        was_at_bottom = scrollbar.value() >= scrollbar.maximum() - 50
         
+        # 更新显示（保留原始换行）
         # 处理首块替换逻辑
         if self.is_first_chunk:
             self.text_edit.setMarkdown(self.markdown_content)
             self.is_first_chunk = False
         else:
             self.text_edit.moveCursor(QTextCursor.End)
-            self.text_edit.setMarkdown(self.markdown_content)
+            self.text_edit.setMarkdown(self.markdown_content.replace('\n', '  \n'))  # Markdown换行
+        
+        if was_at_bottom:
+            self.text_edit.ensureCursorVisible()
+        
+        # 调整窗口高度时考虑公式块高度
+        doc_height = self.text_edit.document().size().height()
+        self.resize(self.width(), min(int(doc_height * 1.2), int(QApplication.desktop().availableGeometry().height() * 0.7)))
         
         # # 智能滚动控制
         # scrollbar = self.text_edit.verticalScrollBar()

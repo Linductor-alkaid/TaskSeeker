@@ -23,7 +23,10 @@ class OCRProcessor:
         self.test_mode = global_config.get('ocr.test_mode', False)  # 测试模式开关
         
         # 初始化公式检测模型
-        self.formula_pattern = re.compile(r'(\$+.*?\$+|\\begin\{.*?}.*?\\end\{.*?})')
+        self.formula_pattern = re.compile(
+            r'(\${2,}(?:[^\$]|\$[^\$])+\${2,}|\\begin\{.*?}.*?\\end\{.*?})',
+            re.DOTALL
+        )
 
     def _init_tesseract(self):
         """配置 Tesseract 路径（根据平台自动处理）"""
@@ -107,14 +110,14 @@ class OCRProcessor:
 
     def _postprocess_text(self, text: str) -> str:
         """文本后处理"""
-        # 合并断行
-        text = re.sub(r'-\n', '', text)  # 连接换行单词
-        text = re.sub(r'\n', ' ', text)  # 替换普通换行为空格
-        
-        # Markdown 格式优化
-        text = re.sub(r'\s+', ' ', text).strip()  # 去除多余空格
-        text = re.sub(r'\.{3,}', '...', text)     # 规范省略号
-        return text
+        # 合并单词断行（保留连字符断行）
+        text = re.sub(r'-\n\s*', '', text)  # 处理带连字符的断行
+        # 保留原始换行和缩进
+        text = re.sub(r'(?<=\S)\n(?=\S)', ' ', text)  # 合并同一段落内的换行
+        text = re.sub(r'\n\s+\n', '\n\n', text)  # 标准化段落间距
+        # 保留Markdown格式的特殊符号
+        text = re.sub(r'\\\$(?!\w)', '$', text)  # 还原转义符号
+        return text.strip()
 
     def _enhance_with_mathpix(self, text: str, img: np.ndarray) -> str:
         """使用 Mathpix 增强公式识别"""
@@ -209,10 +212,30 @@ class OCRProcessor:
     def _replace_formula(self, original: str, position: Tuple[int, int], latex: str) -> str:
         """替换原始文本中的公式部分"""
         # 根据公式类型添加 Markdown 标记
-        if '\n' in latex:
-            return original.replace('$', f'$$\n{latex}\n$$', 1)
-        else:
-            return original.replace('$', f'${latex}$', 1)
+        # 去除多余空白字符
+        latex = re.sub(r'\s+', ' ', latex).strip()
+        
+        # 判断公式类型
+        is_block = any([
+            '\\begin{' in latex,
+            '\\[' in latex,
+            '$$' in original,
+            len(latex.split('\n')) > 1
+        ])
+        
+        replacement = f'$$\n{latex}\n$$' if is_block else f'${latex}$'
+        
+        # 替换次数控制（避免重复替换）
+        return original.replace(original[position[0]:position[1]], replacement, 1)
+    
+    def _validate_markdown(self, text: str) -> str:
+        """校验和修正Markdown格式"""
+        # 平衡公式分隔符
+        text = re.sub(r'\${2,}(?!\s)', '$$', text)  # 确保公式分隔符成对
+        text = re.sub(r'(?<!\\)\$', r'\\$', text)  # 转义游离的$
+        # 规范代码块
+        text = re.sub(r'```(?!\w)', '```\n', text)
+        return text
 
 if __name__ == "__main__":
     # 测试代码
