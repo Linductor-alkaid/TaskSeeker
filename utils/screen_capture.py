@@ -6,8 +6,8 @@ from PyQt5.QtGui import QPainter, QColor, QPen, QCursor
 import mss
 
 class ScreenCapture(QWidget):
-    captured = pyqtSignal(np.ndarray)  # 携带截图的numpy数组信号
-    canceled = pyqtSignal()            # 取消截屏信号
+    captured = pyqtSignal(np.ndarray)
+    canceled = pyqtSignal()
 
     def __init__(self):
         super().__init__()
@@ -15,8 +15,7 @@ class ScreenCapture(QWidget):
         self.init_screen_params()
 
     def init_ui(self):
-        """初始化界面参数"""
-        self.setWindowTitle("截屏区域选择")
+        """初始化无边框透明窗口"""
         self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint)
         self.setAttribute(Qt.WA_TranslucentBackground)
         self.setCursor(Qt.CrossCursor)
@@ -27,29 +26,43 @@ class ScreenCapture(QWidget):
         self.is_dragging = False
 
     def init_screen_params(self):
-        """获取多显示器参数"""
+        """计算多显示器虚拟桌面范围"""
         self.screens = []
+        desktop = QRect()
         for screen in QApplication.screens():
             geometry = screen.geometry()
+            desktop = desktop.united(geometry)
             self.screens.append({
                 "left": geometry.x(),
                 "top": geometry.y(),
                 "width": geometry.width(),
                 "height": geometry.height()
             })
+        
+        # 设置虚拟桌面参数
+        self.virtual_desktop = {
+            "left": desktop.x(),
+            "top": desktop.y(),
+            "width": desktop.width(),
+            "height": desktop.height()
+        }
 
     def start_capture(self):
-        """启动截屏流程"""
-        self.showFullScreen()
+        """覆盖整个虚拟桌面"""
+        self.setGeometry(
+            self.virtual_desktop["left"],
+            self.virtual_desktop["top"],
+            self.virtual_desktop["width"],
+            self.virtual_desktop["height"]
+        )
+        self.show()
         self.activateWindow()
         self.raise_()
 
     def paintEvent(self, event):
-        """绘制半透明遮罩和选区"""
+        """绘制半透明遮罩"""
         painter = QPainter(self)
-        
-        # 绘制全屏半透明遮罩
-        painter.setBrush(QColor(0, 0, 0, 120))
+        painter.setBrush(QColor(0, 0, 0, 0))
         painter.drawRect(self.rect())
         
         # 绘制当前选区
@@ -58,57 +71,58 @@ class ScreenCapture(QWidget):
             self.draw_selection_rect(painter, rect)
 
     def draw_selection_rect(self, painter, rect):
-        """绘制选区矩形和尺寸提示"""
-        # 绘制半透明选区
+        """优化边框绘制效果"""
+        # 半透明填充
         painter.setBrush(QColor(255, 255, 255, 30))
         painter.drawRect(rect)
         
-        # 绘制边框
+        # 虚线边框
         pen = QPen(QColor(255, 69, 0), 2)
-        pen.setStyle(Qt.DashLine)
+        pen.setDashPattern([4, 4])
         painter.setPen(pen)
         painter.drawRect(rect)
         
-        # 绘制尺寸提示
+        # 尺寸标注
         text = f"{rect.width()}×{rect.height()}"
         painter.setPen(Qt.white)
+        painter.setFont(self.font())
         painter.drawText(rect.bottomRight() + QPoint(5, 15), text)
 
     def mousePressEvent(self, event):
-        """开始拖动选区"""
+        """支持右键取消"""
         if event.button() == Qt.LeftButton:
             self.is_dragging = True
             self.selection_start = event.pos()
             self.selection_end = event.pos()
-            self.update()
+        elif event.button() == Qt.RightButton:
+            self.canceled.emit()
+            self.close()
+        self.update()
 
     def mouseMoveEvent(self, event):
-        """更新选区范围"""
+        """实时更新选区"""
         if self.is_dragging:
             self.selection_end = event.pos()
             self.update()
 
     def mouseReleaseEvent(self, event):
-        """结束选区选择"""
+        """释放时校验选区有效性"""
         if event.button() == Qt.LeftButton:
             self.is_dragging = False
-            self.selection_end = event.pos()
-            
             if self.has_valid_selection():
                 self.capture_selection()
             else:
                 self.canceled.emit()
-            
             self.close()
 
     def keyPressEvent(self, event):
-        """处理ESC取消操作"""
-        if event.key() == Qt.Key_Escape:
+        """增强按键支持"""
+        if event.key() in [Qt.Key_Escape, Qt.Key_C]:
             self.canceled.emit()
             self.close()
 
     def normalized_rect(self) -> QRect:
-        """获取标准化后的选区矩形"""
+        """数学坐标矫正"""
         return QRect(
             min(self.selection_start.x(), self.selection_end.x()),
             min(self.selection_start.y(), self.selection_end.y()),
@@ -117,67 +131,48 @@ class ScreenCapture(QWidget):
         )
 
     def has_valid_selection(self) -> bool:
-        """验证选区有效性"""
+        """最小尺寸校验"""
         rect = self.normalized_rect()
-        return rect.width() > 10 and rect.height() > 10
+        return rect.width() >= 10 and rect.height() >= 10
 
     def capture_selection(self):
-        """执行屏幕捕获"""
-        screen_rect = self.get_active_screen()
-        selection = self.normalized_rect()
-        
-        # 转换为全局坐标
-        global_rect = QRect(
-            screen_rect["left"] + selection.x(),
-            screen_rect["top"] + selection.y(),
-            selection.width(),
-            selection.height()
+        """跨显示器截图支持"""
+        rect = self.normalized_rect()
+        global_rect = (
+            self.virtual_desktop["left"] + rect.x(),
+            self.virtual_desktop["top"] + rect.y(),
+            rect.width(),
+            rect.height()
         )
         
-        # 使用mss截取
-        with mss.mss() as sct:
-            monitor = {
-                "left": global_rect.x(),
-                "top": global_rect.y(),
-                "width": global_rect.width(),
-                "height": global_rect.height()
-            }
-            try:
-                screenshot = sct.grab(monitor)
-                img = np.array(screenshot)
-                self.captured.emit(img)
-            except Exception as e:
-                self.canceled.emit()
-
-    def get_active_screen(self) -> dict:
-        """获取当前激活的显示器参数"""
-        cursor_pos = QCursor.pos()
-        for screen in self.screens:
-            if QRect(
-                screen["left"],
-                screen["top"],
-                screen["width"],
-                screen["height"]
-            ).contains(cursor_pos):
-                return screen
-        return self.screens[0]
+        try:
+            with mss.mss() as sct:
+                screenshot = sct.grab({
+                    "left": global_rect[0],
+                    "top": global_rect[1],
+                    "width": global_rect[2],
+                    "height": global_rect[3]
+                })
+                self.captured.emit(np.array(screenshot))
+        except Exception as e:
+            self.canceled.emit()
 
 if __name__ == "__main__":
-    # 测试代码
+    # 测试时启用高DPI支持
     import sys
-    from PIL import Image
-
-    def handle_capture(img):
-        Image.fromarray(img).show()
-
+    from PyQt5.QtCore import Qt, QTimer
+    QApplication.setAttribute(Qt.AA_EnableHighDpiScaling, True)
+    QApplication.setAttribute(Qt.AA_UseHighDpiPixmaps, True)
+    
     app = QApplication(sys.argv)
+    window = ScreenCapture()
     
-    capture = ScreenCapture()
-    capture.captured.connect(handle_capture)
-    capture.canceled.connect(lambda: print("Capture canceled"))
+    from PIL import Image
+    def show_image(img):
+        Image.fromarray(img).show()
     
-    # 延时启动以便观察效果
-    from PyQt5.QtCore import QTimer
-    QTimer.singleShot(1000, capture.start_capture)
+    window.captured.connect(show_image)
+    window.canceled.connect(lambda: print("Cancelled"))
+    QTimer.singleShot(1000, window.start_capture)
     
     sys.exit(app.exec_())

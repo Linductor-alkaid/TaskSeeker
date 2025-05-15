@@ -11,10 +11,26 @@ class Config(QObject):
 
     def __init__(self):
         super().__init__()
+        self._ensure_env_file()  
         self._default_config = self._load_default_config()
         self._user_config_path = self._get_user_config_path()
         self._user_config = self._load_user_config()
         self.config = self._deep_merge(self._default_config, self._user_config)
+
+    def _ensure_env_file(self):
+        """确保项目根目录存在.env文件，否则创建并填充默认内容"""
+        project_root = Path(__file__).resolve().parent.parent  # 项目根目录
+        env_path = project_root / ".env"
+        if not env_path.exists():
+            default_content = (
+                'DEEPSEEK_API_KEY="sk-your-api-key-here"\n'
+                'DEEPSEEK_BASE_URL="链接1"\n'
+                'DEEPSEEK_TIMEOUT=30'
+            )
+            try:
+                env_path.write_text(default_content, encoding="utf-8")
+            except IOError as e:
+                raise RuntimeError(f"无法创建.env文件: {e}")
 
     @staticmethod
     def _load_default_config() -> Dict[str, Any]:

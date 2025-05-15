@@ -166,6 +166,7 @@ class FloatingWindow(QWidget):
         self.resize(self.width(), min(int(doc_height + 40), int(screen_height * 0.6)))
         
         self.streaming = False
+        self.markdown_content = ""
         
     def _flush_stream_buffer(self):
         """批量处理缓冲内容"""
@@ -183,10 +184,10 @@ class FloatingWindow(QWidget):
             self.text_edit.moveCursor(QTextCursor.End)
             self.text_edit.setMarkdown(self.markdown_content)
         
-        # 智能滚动控制
-        scrollbar = self.text_edit.verticalScrollBar()
-        if scrollbar.value() >= scrollbar.maximum() - 50:  # 在接近底部时自动滚动
-            self.text_edit.ensureCursorVisible()
+        # # 智能滚动控制
+        # scrollbar = self.text_edit.verticalScrollBar()
+        # if scrollbar.value() >= scrollbar.maximum() - 50:  # 在接近底部时自动滚动
+        #     self.text_edit.ensureCursorVisible()
         
         self.adjust_size()
 

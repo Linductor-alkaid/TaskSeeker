@@ -63,7 +63,7 @@ fi
 1. 在项目根目录创建 `.env` 文件：
 
 ```ini
-DeepSeek 服务配置
+# DeepSeek 服务配置
 DEEPSEEK_API_KEY="sk-your-api-key-here"
 DEEPSEEK_BASE_URL="https://api.deepseek.com/v1"
 DEEPSEEK_TIMEOUT=30
